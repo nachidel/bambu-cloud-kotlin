@@ -1,5 +1,7 @@
 package com.nachidel.bambu.event
 
+import com.nachidel.bambu.model.PauseReason
+import com.nachidel.bambu.model.PrinterIssue
 import com.nachidel.bambu.model.PrinterSnapshot
 
 sealed interface BambuEvent {
@@ -36,10 +38,15 @@ sealed interface BambuEvent {
     ) : PrinterStatusEvent
 
     data class PrinterPaused(
-        override val snapshot: PrinterSnapshot
+        override val snapshot: PrinterSnapshot,
+        val issue: PrinterIssue? = null
     ) : PrinterStatusEvent
 
     data class PrinterResumed(
+        override val snapshot: PrinterSnapshot
+    ) : PrinterStatusEvent
+
+    data class PrinterFailed(
         override val snapshot: PrinterSnapshot
     ) : PrinterStatusEvent
 }

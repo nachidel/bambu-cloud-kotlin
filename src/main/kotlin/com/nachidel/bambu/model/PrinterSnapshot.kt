@@ -22,5 +22,8 @@ data class PrinterSnapshot(
 
     val totalLayers: Int? = null,
 
-    val remainingTime: Int? = null
+    val remainingTime: Int? = null,
+
+    val diagnostics: PrinterDiagnostics =
+        PrinterDiagnostics()
 )

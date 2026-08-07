@@ -9,6 +9,7 @@ enum class PrinterState {
     PRINTING,
     PAUSED,
     FINISHED,
+    FAILED,
     ERROR;
 
     companion object {
@@ -26,6 +27,7 @@ enum class PrinterState {
                 "RUNNING" -> PRINTING
                 "PAUSE" -> PAUSED
                 "FINISH" -> FINISHED
+                "FAILED" -> FAILED
 
                 else -> UNKNOWN
             }

@@ -8,6 +8,16 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.nachidel.bambu.model.HmsEntry
+import com.nachidel.bambu.model.PauseReason
+import com.nachidel.bambu.model.PrinterDiagnostics
+import com.nachidel.bambu.model.PrinterIssueDetector
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 internal class PrinterStatusTracker {
 
@@ -26,15 +36,21 @@ internal class PrinterStatusTracker {
         get() = currentSnapshot
 
 
-    fun update(payload: String): List<BambuEvent> {
+    fun update(
+        payload: String
+    ): List<BambuEvent> {
 
-        val root = runCatching {
-            json.parseToJsonElement(payload).jsonObject
-        }.getOrNull()
-            ?: return emptyList()
+        val root =
+            runCatching {
+                json.parseToJsonElement(payload)
+                    .jsonObject
+            }.getOrNull()
+                ?: return emptyList()
 
-        val print = root["print"]?.jsonObject
-            ?: return emptyList()
+        val print =
+            root["print"]
+                ?.jsonObject
+                ?: return emptyList()
 
         val previousSnapshot =
             currentSnapshot
@@ -49,21 +65,48 @@ internal class PrinterStatusTracker {
             return emptyList()
         }
 
-        currentSnapshot = newSnapshot
+        /*
+         * On mémorise TOUJOURS le nouveau snapshot,
+         * y compris lorsque seuls les diagnostics
+         * ont changé.
+         */
+        currentSnapshot =
+            newSnapshot
 
         val events =
             mutableListOf<BambuEvent>()
 
+        /*
+         * Les transitions d'état restent traitées
+         * indépendamment de PrinterStatusChanged.
+         */
         handleStateTransition(
             previous = previousSnapshot,
             current = newSnapshot,
             events = events
         )
 
-        events +=
-            BambuEvent.PrinterStatusChanged(
-                snapshot = newSnapshot
+        /*
+         * On ne publie PrinterStatusChanged que
+         * lorsqu'une information métier visible
+         * de l'impression a réellement changé.
+         *
+         * Une simple modification de diagnostics
+         * ne doit pas produire :
+         *
+         * Etat=UNKNOWN | Bambu=null | ...
+         */
+        if (
+            hasStatusChanged(
+                previous = previousSnapshot,
+                current = newSnapshot
             )
+        ) {
+            events +=
+                BambuEvent.PrinterStatusChanged(
+                    snapshot = newSnapshot
+                )
+        }
 
         return events
     }
@@ -138,6 +181,12 @@ internal class PrinterStatusTracker {
                 ?: print.intValue("mc_remaining_time")
                 ?: base.remainingTime
 
+        val diagnostics =
+            applyDiagnosticsPatch(
+                base = base.diagnostics,
+                print = print
+            )
+
         return base.copy(
             state = newState,
             rawGcodeState = newRawGcodeState,
@@ -146,10 +195,97 @@ internal class PrinterStatusTracker {
             percent = newPercent,
             currentLayer = newCurrentLayer,
             totalLayers = newTotalLayers,
-            remainingTime = newRemainingTime
+            remainingTime = newRemainingTime,
+            diagnostics = diagnostics
         )
     }
 
+    private fun applyDiagnosticsPatch(
+        base: PrinterDiagnostics,
+        print: JsonObject
+    ): PrinterDiagnostics {
+
+        val job =
+            print["job"] as? JsonObject
+
+        val err2 =
+            print["err2"] as? JsonObject
+
+        val hms =
+            if (print.containsKey("hms")) {
+                parseHms(
+                    print["hms"]
+                )
+            } else {
+                base.hms
+            }
+
+        return base.copy(
+
+            stageCurrent =
+                print.intValue("stg_cur")
+                    ?: base.stageCurrent,
+
+            machineStage =
+                print.intValue("mc_stage")
+                    ?: base.machineStage,
+
+            printStage =
+                print.rawValue("mc_print_stage")
+                    ?: base.printStage,
+
+            printSubStage =
+                print.intValue("mc_print_sub_stage")
+                    ?: base.printSubStage,
+
+            machineAction =
+                print.intValue("mc_action")
+                    ?: base.machineAction,
+
+            gcodeAction =
+                print.intValue("print_gcode_action")
+                    ?: base.gcodeAction,
+
+            jobState =
+                job?.intValue("job_state")
+                    ?: base.jobState,
+
+            machineState =
+                print.intValue("state")
+                    ?: base.machineState,
+
+            messageCode =
+                print.rawValue("msg")
+                    ?: base.messageCode,
+
+            printErrorCode =
+                print.rawValue("print_error")
+                    ?: base.printErrorCode,
+
+            machinePrintErrorCode =
+                print.rawValue(
+                    "mc_print_error_code"
+                ) ?: base.machinePrintErrorCode,
+
+            failReason =
+                print.rawValue("fail_reason")
+                    ?: base.failReason,
+
+            errorCode =
+                print.rawValue("err")
+                    ?: base.errorCode,
+
+            secondaryErrorCode =
+                err2?.rawValue("err_code")
+                    ?: base.secondaryErrorCode,
+
+            xcamStatus =
+                print.rawValue("xcam_status")
+                    ?: base.xcamStatus,
+
+            hms = hms
+        )
+    }
 
     private fun handleStateTransition(
         previous: PrinterSnapshot,
@@ -210,7 +346,11 @@ internal class PrinterStatusTracker {
 
                 events +=
                     BambuEvent.PrinterPaused(
-                        current
+                        current,
+                        issue =
+                            PrinterIssueDetector.detect(
+                                current.diagnostics
+                            )
                     )
             }
 
@@ -238,9 +378,67 @@ internal class PrinterStatusTracker {
                         current
                     )
             }
+
+            currentState == PrinterState.FAILED -> {
+
+                events +=
+                    BambuEvent.PrinterFailed(
+                        current
+                    )
+            }
         }
     }
 
+    private fun hasStatusChanged(
+        previous: PrinterSnapshot,
+        current: PrinterSnapshot
+    ): Boolean {
+
+        return previous.state != current.state ||
+                previous.rawGcodeState != current.rawGcodeState ||
+                previous.jobId != current.jobId ||
+                previous.subtaskName != current.subtaskName ||
+                previous.percent != current.percent ||
+                previous.currentLayer != current.currentLayer ||
+                previous.totalLayers != current.totalLayers ||
+                previous.remainingTime != current.remainingTime
+    }
+
+    private fun parseHms(
+        element: JsonElement?
+    ): List<HmsEntry> {
+
+        val array =
+            element as? JsonArray
+                ?: return emptyList()
+
+        return array.mapNotNull { item ->
+
+            val obj =
+                item as? JsonObject
+                    ?: return@mapNotNull null
+
+            val attr =
+                (obj["attr"] as? JsonPrimitive)
+                    ?.longOrNull
+
+            val code =
+                (obj["code"] as? JsonPrimitive)
+                    ?.longOrNull
+
+            if (
+                attr == null &&
+                code == null
+            ) {
+                null
+            } else {
+                HmsEntry(
+                    attr = attr,
+                    code = code
+                )
+            }
+        }
+    }
 
     private fun JsonObject.stringValue(
         name: String
@@ -261,4 +459,14 @@ internal class PrinterStatusTracker {
             ?.jsonPrimitive
             ?.intOrNull
     }
+
+    private fun JsonObject.rawValue(
+        key: String
+    ): String? {
+
+        return (this[key] as? JsonPrimitive)
+            ?.contentOrNull
+    }
+
+
 }

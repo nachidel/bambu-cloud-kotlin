@@ -4,6 +4,8 @@ import com.nachidel.bambu.api.BambuCloudClient
 import com.nachidel.bambu.auth.AuthenticationResult
 import com.nachidel.bambu.event.BambuEvent
 import com.nachidel.bambu.exception.BambuAuthenticationException
+import com.nachidel.bambu.model.PrinterIssue
+import com.nachidel.bambu.model.PrinterState
 import com.nachidel.bambu.model.PrinterType
 import com.nachidel.bambu.value.AccessToken
 import kotlinx.coroutines.*
@@ -82,6 +84,46 @@ fun main(): Unit = runBlocking {
 
                         val s = event.snapshot
 
+                        if (
+                            s.state == PrinterState.PAUSED ||
+                            s.state == PrinterState.FAILED
+                        ) {
+
+                            val d =
+                                s.diagnostics
+
+                            println(
+                                ">>> DIAG | " +
+                                        "stage=${d.stageCurrent} | " +
+                                        "mcStage=${d.machineStage} | " +
+                                        "printStage=${d.printStage} | " +
+                                        "subStage=${d.printSubStage} | " +
+                                        "jobState=${d.jobState} | " +
+                                        "state=${d.machineState} | " +
+                                        "mcAction=${d.machineAction} | " +
+                                        "gcodeAction=${d.gcodeAction}"
+                            )
+
+                            println(
+                                ">>> ERROR | " +
+                                        "msg=${d.messageCode} | " +
+                                        "print=${d.printErrorCode} | " +
+                                        "mc=${d.machinePrintErrorCode} | " +
+                                        "fail=${d.failReason} | " +
+                                        "err=${d.errorCode} | " +
+                                        "err2=${d.secondaryErrorCode} | " +
+                                        "xcam=${d.xcamStatus}"
+                            )
+
+                            println(
+                                ">>> HMS | " +
+                                        d.hms.joinToString {
+                                            "attr=${it.attr},code=${it.code}"
+                                        }
+                            )
+                        }
+
+
                         println(
                             ">>> Etat=${s.state} | " +
                                     "Bambu=${s.rawGcodeState} | " +
@@ -99,14 +141,48 @@ fun main(): Unit = runBlocking {
 
                         println(
                             ">>> IMPRESSION EN PAUSE : " +
-                                    "${event.snapshot.subtaskName}"
+                                    event.snapshot.subtaskName
                         )
+
+                        when (val issue = event.issue) {
+
+                            is PrinterIssue.FilamentRunout ->
+                                println(
+                                    ">>> CAUSE : FILAMENT EPUISE " +
+                                            "[${issue.rawCode}]"
+                                )
+
+                            is PrinterIssue.ForeignObjectOnBuildPlate ->
+                                println(
+                                    ">>> CAUSE : OBJET DETECTE SUR LE PLATEAU " +
+                                            "[${issue.rawCode}]"
+                                )
+
+                            is PrinterIssue.Unknown ->
+                                println(
+                                    ">>> CAUSE : INCONNUE " +
+                                            "[${issue.rawCode}]"
+                                )
+
+                            null ->
+                                println(
+                                    ">>> CAUSE : AUCUNE CAUSE IDENTIFIEE"
+                                )
+                        }
                     }
 
                     is BambuEvent.PrinterResumed -> {
 
                         println(
                             ">>> IMPRESSION REPRISE : " +
+                                    "${event.snapshot.subtaskName}"
+                        )
+                    }
+
+                    is BambuEvent.PrinterFailed -> {
+
+                        println(
+                            ">>> IMPRESSION INTERROMPUE : " +
                                     "${event.snapshot.subtaskName}"
                         )
                     }
@@ -207,6 +283,8 @@ fun main(): Unit = runBlocking {
                                 "${result.message}"
                     )
                 }
+
+
             }
         }
 

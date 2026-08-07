@@ -1,6 +1,11 @@
 package com.nachidel.bambu.internal
 
 import com.nachidel.bambu.event.BambuEvent
+import com.nachidel.bambu.model.BambuErrorCode
+import com.nachidel.bambu.model.PauseReason
+import com.nachidel.bambu.model.PrinterDiagnostics
+import com.nachidel.bambu.model.PrinterIssue
+import com.nachidel.bambu.model.PrinterIssueDetector
 import com.nachidel.bambu.model.PrinterState
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -513,6 +518,227 @@ class PrinterStatusTrackerTest {
         assertEquals(
             PrinterState.PRINTING,
             tracker.snapshot.state
+        )
+    }
+
+    @Test
+    fun `full status extracts printer diagnostics`() {
+
+        val tracker =
+            PrinterStatusTracker()
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "PAUSE",
+            "stg_cur": 14,
+            "mc_stage": 2,
+            "mc_print_stage": "2",
+            "mc_print_sub_stage": 0,
+            "mc_action": 14,
+            "print_gcode_action": 14,
+            "state": 4,
+            "job": {
+              "job_state": 4
+            },
+            "msg": 0,
+            "print_error": 0,
+            "mc_print_error_code": "0",
+            "fail_reason": "0",
+            "err": "0",
+            "err2": {
+              "err_code": "0"
+            },
+            "xcam_status": "0",
+            "hms": [
+              {
+                "attr": 83886592,
+                "code": 196618
+              }
+            ]
+          }
+        }
+        """.trimIndent()
+        )
+
+        val d =
+            tracker.snapshot.diagnostics
+
+        assertEquals(
+            14,
+            d.stageCurrent
+        )
+
+        assertEquals(
+            4,
+            d.jobState
+        )
+
+        assertEquals(
+            "0",
+            d.printErrorCode
+        )
+
+        assertEquals(
+            1,
+            d.hms.size
+        )
+
+        assertEquals(
+            83886592L,
+            d.hms.first().attr
+        )
+
+        assertEquals(
+            196618L,
+            d.hms.first().code
+        )
+    }
+
+    @Test
+    fun `diagnostics only update does not emit status changed`() {
+
+        val tracker =
+            PrinterStatusTracker()
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "RUNNING",
+            "job_id": "job-1",
+            "percent": 10
+          }
+        }
+        """.trimIndent()
+        )
+
+        val events =
+            tracker.update(
+                """
+            {
+              "print": {
+                "mc_stage": 2,
+                "print_error": 123
+              }
+            }
+            """.trimIndent()
+            )
+
+        assertFalse(
+            events.any {
+                it is BambuEvent.PrinterStatusChanged
+            }
+        )
+
+        assertEquals(
+            2,
+            tracker.snapshot
+                .diagnostics
+                .machineStage
+        )
+
+        assertEquals(
+            "123",
+            tracker.snapshot
+                .diagnostics
+                .printErrorCode
+        )
+    }
+
+    @Test
+    fun `decimal fail reason is converted to Bambu hexadecimal code`() {
+
+        val code =
+            BambuErrorCode.fromRaw(
+                "83918958"
+            )
+
+        assertEquals(
+            "0500806E",
+            code?.value
+        )
+    }
+
+    @Test
+    fun `foreign object code maps to build plate pause reason`() {
+
+        val diagnostics =
+            PrinterDiagnostics(
+                failReason = "83918958"
+            )
+
+        assertEquals(
+            PauseReason.FOREIGN_OBJECT_ON_BUILD_PLATE,
+            PauseReason.fromDiagnostics(
+                diagnostics
+            )
+        )
+    }
+
+    @Test
+    fun `unknown pause reason remains unknown`() {
+
+        val diagnostics =
+            PrinterDiagnostics(
+                failReason = "0"
+            )
+
+        assertEquals(
+            PauseReason.UNKNOWN,
+            PauseReason.fromDiagnostics(
+                diagnostics
+            )
+        )
+    }
+
+    @Test
+    fun `filament runout is detected from print error`() {
+
+        val diagnostics =
+            PrinterDiagnostics(
+                printErrorCode = "117473297",
+                failReason = "83918958"
+            )
+
+        val issue =
+            PrinterIssueDetector.detect(
+                diagnostics
+            )
+
+        assertTrue(
+            issue is PrinterIssue.FilamentRunout
+        )
+
+        assertEquals(
+            "07008011",
+            issue?.rawCode
+        )
+    }
+
+    @Test
+    fun `foreign object is detected when no active print error exists`() {
+
+        val diagnostics =
+            PrinterDiagnostics(
+                printErrorCode = "0",
+                machinePrintErrorCode = "0",
+                failReason = "83918958"
+            )
+
+        val issue =
+            PrinterIssueDetector.detect(
+                diagnostics
+            )
+
+        assertTrue(
+            issue is PrinterIssue.ForeignObjectOnBuildPlate
+        )
+
+        assertEquals(
+            "0500806E",
+            issue?.rawCode
         )
     }
 }

@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
@@ -20,6 +21,7 @@ import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.util.UUID
 import javax.net.ssl.SSLContext
+import kotlin.time.Duration.Companion.milliseconds
 
 internal class BambuCloudMqttClient(
     private val userId: Long,
@@ -52,8 +54,6 @@ internal class BambuCloudMqttClient(
     val events: Flow<BambuEvent> =
         _events.asSharedFlow()
 
-    private var pushAllJob: Job? = null
-
     private val client =
         MqttClient(
             broker,
@@ -61,15 +61,15 @@ internal class BambuCloudMqttClient(
             MemoryPersistence()
         )
 
+    private var initialStatusJob: Job? = null
+    private var statusPollingJob: Job? = null
 
     init {
         configureCallback()
     }
 
-
     val isConnected: Boolean
         get() = client.isConnected
-
 
     fun connect() {
 
@@ -104,7 +104,6 @@ internal class BambuCloudMqttClient(
         client.connect(options)
     }
 
-
     private fun configureCallback() {
 
         client.setCallback(
@@ -114,14 +113,47 @@ internal class BambuCloudMqttClient(
                     reconnect: Boolean,
                     serverURI: String?
                 ) {
-                    onConnected()
-                }
+                    client.subscribe(reportTopic, 0)
 
+                    _events.tryEmit(
+                        BambuEvent.PrinterConnected
+                    )
+
+                    initialStatusJob?.cancel()
+
+                    initialStatusJob =
+                        scope.launch {
+
+                            /*
+                             * Lors de nos tests, envoyer le pushall
+                             * immédiatement après la connexion ne
+                             * produisait aucune réponse.
+                             *
+                             * Un délai de 2 secondes fonctionne.
+                             */
+                            delay(2_000.milliseconds)
+
+                            if (!client.isConnected) {
+                                return@launch
+                            }
+
+                            // On démarre d'abord le polling afin qu'une
+                            // erreur ponctuelle du premier pushall ne
+                            // l'empêche pas de fonctionner ensuite.
+                            startStatusPolling()
+
+                            requestFullStatus()
+                        }
+                }
 
                 override fun connectionLost(
                     cause: Throwable?
                 ) {
-                    pushAllJob?.cancel()
+                    initialStatusJob?.cancel()
+                    initialStatusJob = null
+
+                    statusPollingJob?.cancel()
+                    statusPollingJob = null
 
                     _events.tryEmit(
                         BambuEvent.PrinterDisconnected(
@@ -129,7 +161,6 @@ internal class BambuCloudMqttClient(
                         )
                     )
                 }
-
 
                 override fun messageArrived(
                     topic: String?,
@@ -154,7 +185,6 @@ internal class BambuCloudMqttClient(
                     }
                 }
 
-
                 override fun deliveryComplete(
                     token: IMqttDeliveryToken?
                 ) {
@@ -163,59 +193,6 @@ internal class BambuCloudMqttClient(
             }
         )
     }
-
-
-    private fun onConnected() {
-
-        subscribe()
-
-        _events.tryEmit(
-            BambuEvent.PrinterConnected
-        )
-
-        scheduleFullStatusRequest()
-    }
-
-
-    private fun subscribe() {
-
-        if (!client.isConnected) {
-            return
-        }
-
-        client.subscribe(
-            reportTopic,
-            0
-        )
-    }
-
-
-    private fun scheduleFullStatusRequest() {
-
-        pushAllJob?.cancel()
-
-        pushAllJob =
-            scope.launch {
-
-                /*
-                 * Important :
-                 *
-                 * Lors de nos tests, envoyer le pushall
-                 * immédiatement après la connexion ne
-                 * produisait aucune réponse.
-                 *
-                 * Un délai de 2 secondes fonctionne.
-                 */
-                delay(2_000)
-
-                if (!client.isConnected) {
-                    return@launch
-                }
-
-                requestFullStatus()
-            }
-    }
-
 
     fun requestFullStatus() {
 
@@ -251,10 +228,38 @@ internal class BambuCloudMqttClient(
         )
     }
 
+    private fun startStatusPolling() {
+
+        if (statusPollingJob?.isActive == true) {
+            return
+        }
+
+        statusPollingJob =
+            scope.launch {
+                while (isActive) {
+
+                    delay(10_000.milliseconds)
+
+                    if (!client.isConnected) {
+                        continue
+                    }
+
+                    try {
+                        requestFullStatus()
+                    } catch (_: Exception) {
+                        // Le polling ne doit jamais tuer le client MQTT.
+                    }
+                }
+            }
+    }
 
     override fun close() {
 
-        pushAllJob?.cancel()
+        initialStatusJob?.cancel()
+        initialStatusJob = null
+
+        statusPollingJob?.cancel()
+        statusPollingJob = null
 
         if (client.isConnected) {
             client.disconnect()
