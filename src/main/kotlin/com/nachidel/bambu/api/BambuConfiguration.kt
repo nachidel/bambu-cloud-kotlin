@@ -6,6 +6,8 @@ class BambuConfiguration {
 
     var accessToken: AccessToken? = null
 
+    var printerId: String? = null
+
     var reconnectAutomatically = true
 
     var region = Region.GLOBAL

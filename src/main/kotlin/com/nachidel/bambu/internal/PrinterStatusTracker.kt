@@ -78,39 +78,61 @@ internal class PrinterStatusTracker {
                 jsonObject
             }?.getOrNull()
 
+        val incomingJobId =
+            print.stringValue("job_id")
+
+        val jobChanged =
+            incomingJobId != null &&
+                    current.jobId != null &&
+                    incomingJobId != current.jobId
+
+        /*
+         * Nouveau job :
+         * on efface toutes les informations appartenant
+         * à l'impression précédente.
+         */
+        val base =
+            if (jobChanged) {
+                PrinterSnapshot(
+                    jobId = incomingJobId
+                )
+            } else {
+                current
+            }
+
         val newState =
             print.stringValue("gcode_state")
-                ?: current.gcodeState
+                ?: base.gcodeState
 
         val newJobId =
-            print.stringValue("job_id")
-                ?: current.jobId
+            incomingJobId
+                ?: base.jobId
 
         val newSubtaskName =
             print.stringValue("subtask_name")
-                ?: current.subtaskName
+                ?: base.subtaskName
 
         val newPercent =
             print.intValue("percent")
                 ?: print.intValue("mc_percent")
-                ?: current.percent
+                ?: base.percent
 
         val newCurrentLayer =
             print.intValue("layer_num")
                 ?: threeD?.intValue("layer_num")
-                ?: current.currentLayer
+                ?: base.currentLayer
 
         val newTotalLayers =
             print.intValue("total_layer_num")
                 ?: threeD?.intValue("total_layer_num")
-                ?: current.totalLayers
+                ?: base.totalLayers
 
         val newRemainingTime =
             print.intValue("remain_time")
                 ?: print.intValue("mc_remaining_time")
-                ?: current.remainingTime
+                ?: base.remainingTime
 
-        return current.copy(
+        return base.copy(
             gcodeState = newState,
             jobId = newJobId,
             subtaskName = newSubtaskName,

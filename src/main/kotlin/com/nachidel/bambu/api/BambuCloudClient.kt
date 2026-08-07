@@ -4,7 +4,7 @@ import com.nachidel.bambu.event.BambuEvent
 import com.nachidel.bambu.internal.DefaultBambuCloudClient
 import kotlinx.coroutines.flow.Flow
 
-interface BambuCloudClient {
+interface BambuCloudClient : AutoCloseable {
 
     val events: Flow<BambuEvent>
 
@@ -12,19 +12,20 @@ interface BambuCloudClient {
 
     suspend fun disconnect()
 
+    override fun close()
+
     companion object {
 
         operator fun invoke(
             block: BambuConfiguration.() -> Unit = {}
-        ): DefaultBambuCloudClient {
+        ): BambuCloudClient {
 
-            val configuration = BambuConfiguration()
-                .apply(block)
+            val configuration =
+                BambuConfiguration().apply(block)
 
-            return DefaultBambuCloudClient(configuration)
-
+            return DefaultBambuCloudClient(
+                configuration
+            )
         }
-
     }
-
 }

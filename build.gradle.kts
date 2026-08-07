@@ -8,8 +8,8 @@ group = "com.nachidel"
 version = "0.1.0-SNAPSHOT"
 
 application {
-    //mainClass.set("com.nachidel.bambu.MainKt")
-    mainClass.set("com.nachidel.bambu.explorer.MainKt")
+    mainClass.set("com.nachidel.bambu.MainKt")
+    //mainClass.set("com.nachidel.bambu.explorer.MainKt")
 }
 
 tasks.named<JavaExec>("run") {
@@ -56,6 +56,16 @@ dependencies {
 
     implementation(libs.paho.client)
 
+    testImplementation(kotlin("test"))
+
     testImplementation(libs.kotest.runner.junit5)
     testImplementation(libs.kotest.assertions.core)
+}
+
+tasks.test {
+    useJUnitPlatform()
+
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
 }
