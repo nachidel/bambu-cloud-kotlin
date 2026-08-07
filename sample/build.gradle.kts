@@ -25,13 +25,33 @@ tasks.named<JavaExec>("run") {
 
     standardInput = System.`in`
 
-    val token =
-        providers.gradleProperty("bambu.token").orNull
+    providers.gradleProperty("bambu.token")
+        .orNull
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+            environment(
+                "BAMBU_TOKEN",
+                it
+            )
+        }
 
-    if (!token.isNullOrBlank()) {
-        environment(
-            "BAMBU_TOKEN",
-            token
-        )
-    }
+    providers.gradleProperty("bambu.email")
+        .orNull
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+            environment(
+                "BAMBU_EMAIL",
+                it
+            )
+        }
+
+    providers.gradleProperty("bambu.password")
+        .orNull
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+            environment(
+                "BAMBU_PASSWORD",
+                it
+            )
+        }
 }

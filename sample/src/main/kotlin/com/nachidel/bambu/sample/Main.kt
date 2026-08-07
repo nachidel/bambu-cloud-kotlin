@@ -1,6 +1,7 @@
 package com.nachidel.bambu.sample
 
 import com.nachidel.bambu.api.BambuCloudClient
+import com.nachidel.bambu.auth.AuthenticationResult
 import com.nachidel.bambu.event.BambuEvent
 import com.nachidel.bambu.value.AccessToken
 import kotlinx.coroutines.*
@@ -8,12 +9,21 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 fun main(): Unit = runBlocking {
 
-    val token =
-        System.getenv("BAMBU_TOKEN")?.trim()?.takeIf { it.isNotEmpty() } ?: error("Variable BAMBU_TOKEN absente")
+    val existingToken =
+        System.getenv("BAMBU_TOKEN")
+            ?.trim()
+            ?.takeIf {
+                it.isNotEmpty()
+            }
 
-    val bambu = BambuCloudClient {
-        accessToken = AccessToken(token)
-    }
+    val bambu =
+        BambuCloudClient {
+
+            if (existingToken != null) {
+                accessToken =
+                    AccessToken(existingToken)
+            }
+        }
 
     val closed = AtomicBoolean(false)
 
@@ -74,6 +84,102 @@ fun main(): Unit = runBlocking {
                             ">>> Etat=${s.gcodeState} | " + "Progression=${s.percent}% | " + "Couche=${s.currentLayer}/${s.totalLayers} | " + "Restant=${s.remainingTime} | " + "Projet=${s.subtaskName}"
                         )
                     }
+                }
+            }
+        }
+
+        if (existingToken == null) {
+
+            val email =
+                System.getenv("BAMBU_EMAIL")
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotEmpty()
+                    }
+                    ?: error(
+                        "BAMBU_EMAIL absent"
+                    )
+
+            val password =
+                System.getenv("BAMBU_PASSWORD")
+                    ?.takeIf {
+                        it.isNotEmpty()
+                    }
+                    ?: error(
+                        "BAMBU_PASSWORD absent"
+                    )
+
+            when (
+                val result =
+                    bambu.login(
+                        email,
+                        password
+                    )
+            ) {
+
+                is AuthenticationResult.Authenticated -> {
+
+                    println(
+                        "Authentification reussie."
+                    )
+                }
+
+                AuthenticationResult.VerificationCodeRequired -> {
+
+                    println(
+                        "Code de verification demande."
+                    )
+
+                    print(
+                        "Code recu par email : "
+                    )
+
+                    val code =
+                        withContext(Dispatchers.IO) {
+                            readln()
+                                .trim()
+                        }
+
+                    when (
+                        val verification =
+                            bambu.verifyCode(
+                                email,
+                                code
+                            )
+                    ) {
+
+                        is AuthenticationResult.Authenticated -> {
+
+                            println(
+                                "Verification reussie."
+                            )
+                        }
+
+                        AuthenticationResult.VerificationCodeRequired -> {
+
+                            error(
+                                "Un nouveau code de verification est demande."
+                            )
+                        }
+
+                        is AuthenticationResult.Rejected -> {
+
+                            error(
+                                "Verification refusee : " +
+                                        "${verification.code} - " +
+                                        "${verification.message}"
+                            )
+                        }
+                    }
+                }
+
+                is AuthenticationResult.Rejected -> {
+
+                    error(
+                        "Authentification refusee : " +
+                                "${result.code} - " +
+                                "${result.message}"
+                    )
                 }
             }
         }

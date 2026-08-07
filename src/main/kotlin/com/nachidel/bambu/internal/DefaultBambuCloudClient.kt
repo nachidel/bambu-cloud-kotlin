@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import com.nachidel.bambu.auth.AuthenticationResult
+import com.nachidel.bambu.auth.AuthenticationService
 
 class DefaultBambuCloudClient(
     private val configuration: BambuConfiguration
@@ -38,9 +40,61 @@ class DefaultBambuCloudClient(
             httpClient
         )
 
+    private val authentication =
+        AuthenticationService(
+            httpClient
+        )
+
     private var mqttClient:
             BambuCloudMqttClient? = null
 
+
+    override suspend fun login(
+        email: String,
+        password: String
+    ): AuthenticationResult {
+
+        val result =
+            authentication.login(
+                email = email,
+                password = password
+            )
+
+        rememberAccessToken(result)
+
+        return result
+    }
+
+
+    override suspend fun verifyCode(
+        email: String,
+        code: String
+    ): AuthenticationResult {
+
+        val result =
+            authentication.verifyCode(
+                email = email,
+                code = code
+            )
+
+        rememberAccessToken(result)
+
+        return result
+    }
+
+
+    private fun rememberAccessToken(
+        result: AuthenticationResult
+    ) {
+
+        if (
+            result is AuthenticationResult.Authenticated
+        ) {
+
+            configuration.accessToken =
+                result.accessToken
+        }
+    }
 
     override suspend fun connect() {
 
