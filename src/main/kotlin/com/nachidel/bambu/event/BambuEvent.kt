@@ -34,4 +34,12 @@ sealed interface BambuEvent {
     data class PrinterFinished(
         override val snapshot: PrinterSnapshot
     ) : PrinterStatusEvent
+
+    data class PrinterPaused(
+        override val snapshot: PrinterSnapshot
+    ) : PrinterStatusEvent
+
+    data class PrinterResumed(
+        override val snapshot: PrinterSnapshot
+    ) : PrinterStatusEvent
 }

@@ -3,6 +3,8 @@ package com.nachidel.bambu.sample
 import com.nachidel.bambu.api.BambuCloudClient
 import com.nachidel.bambu.auth.AuthenticationResult
 import com.nachidel.bambu.event.BambuEvent
+import com.nachidel.bambu.exception.BambuAuthenticationException
+import com.nachidel.bambu.model.PrinterType
 import com.nachidel.bambu.value.AccessToken
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
@@ -81,7 +83,31 @@ fun main(): Unit = runBlocking {
                         val s = event.snapshot
 
                         println(
-                            ">>> Etat=${s.gcodeState} | " + "Progression=${s.percent}% | " + "Couche=${s.currentLayer}/${s.totalLayers} | " + "Restant=${s.remainingTime} | " + "Projet=${s.subtaskName}"
+                            ">>> Etat=${s.state} | " +
+                                    "Bambu=${s.rawGcodeState} | " +
+                                    "Progression=${s.percent}% | " +
+                                    "Couche=${s.currentLayer}/${s.totalLayers} | " +
+                                    "Restant=${s.remainingTime} | " +
+                                    "Projet=${s.subtaskName}"
+                        )
+                       /* println(
+                            ">>> Etat=${s.state} | " + "Progression=${s.percent}% | " + "Couche=${s.currentLayer}/${s.totalLayers} | " + "Restant=${s.remainingTime} | " + "Projet=${s.subtaskName}"
+                        )*/
+                    }
+
+                    is BambuEvent.PrinterPaused -> {
+
+                        println(
+                            ">>> IMPRESSION EN PAUSE : " +
+                                    "${event.snapshot.subtaskName}"
+                        )
+                    }
+
+                    is BambuEvent.PrinterResumed -> {
+
+                        println(
+                            ">>> IMPRESSION REPRISE : " +
+                                    "${event.snapshot.subtaskName}"
                         )
                     }
                 }
@@ -184,9 +210,44 @@ fun main(): Unit = runBlocking {
             }
         }
 
-        println("Connexion a Bambu Cloud...")
+        val printers =
+            bambu.printers()
 
-        bambu.connect()
+        val h2c =
+            printers.firstOrNull {
+                it.type == PrinterType.H2C
+            }
+
+        println("Imprimantes liees au compte :")
+
+        printers.forEach { printer ->
+            println(
+                "- ${printer.name} | " +
+                        "${printer.type} | " +
+                        "${printer.serial} | " +
+                        "${printer.state}"
+            )
+        }
+
+        println()
+
+        try {
+            println("Connexion a Bambu Cloud...")
+            bambu.connect()
+        } catch (
+            e: BambuAuthenticationException
+        ) {
+
+            println(
+                "Le token Bambu n'est plus valide."
+            )
+
+            println(
+                "Une nouvelle authentification est necessaire."
+            )
+
+            return@runBlocking
+        }
 
         println("Client actif.")
         println("Tape q puis Entree pour quitter.")

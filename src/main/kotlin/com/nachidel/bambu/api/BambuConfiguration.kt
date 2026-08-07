@@ -1,12 +1,13 @@
 package com.nachidel.bambu.api
 
 import com.nachidel.bambu.value.AccessToken
+import com.nachidel.bambu.value.SerialNumber
 
 class BambuConfiguration {
 
     var accessToken: AccessToken? = null
 
-    var printerId: String? = null
+    var printer: SerialNumber? = null
 
     var reconnectAutomatically = true
 

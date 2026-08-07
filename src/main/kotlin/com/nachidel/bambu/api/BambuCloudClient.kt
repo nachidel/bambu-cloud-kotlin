@@ -3,6 +3,7 @@ package com.nachidel.bambu.api
 import com.nachidel.bambu.auth.AuthenticationResult
 import com.nachidel.bambu.event.BambuEvent
 import com.nachidel.bambu.internal.DefaultBambuCloudClient
+import com.nachidel.bambu.model.Printer
 import kotlinx.coroutines.flow.Flow
 
 interface BambuCloudClient : AutoCloseable {
@@ -20,6 +21,8 @@ interface BambuCloudClient : AutoCloseable {
     ): AuthenticationResult
 
     suspend fun connect()
+
+    suspend fun printers(): List<Printer>
 
     suspend fun disconnect()
 

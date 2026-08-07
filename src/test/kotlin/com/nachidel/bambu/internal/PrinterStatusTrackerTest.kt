@@ -1,6 +1,7 @@
 package com.nachidel.bambu.internal
 
 import com.nachidel.bambu.event.BambuEvent
+import com.nachidel.bambu.model.PrinterState
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -33,8 +34,8 @@ class PrinterStatusTrackerTest {
             )
 
         assertEquals(
-            "FINISH",
-            tracker.snapshot.gcodeState
+            PrinterState.FINISHED,
+            tracker.snapshot.state
         )
 
         assertFalse(
@@ -274,8 +275,8 @@ class PrinterStatusTrackerTest {
         )
 
         assertEquals(
-            "FINISH",
-            tracker.snapshot.gcodeState
+            PrinterState.FINISHED,
+            tracker.snapshot.state
         )
 
         assertEquals(
@@ -335,8 +336,8 @@ class PrinterStatusTrackerTest {
             tracker.snapshot
 
         assertEquals(
-            "RUNNING",
-            snapshot.gcodeState
+            PrinterState.PRINTING,
+            tracker.snapshot.state
         )
 
         assertEquals(
@@ -367,6 +368,151 @@ class PrinterStatusTrackerTest {
         assertEquals(
             58,
             snapshot.remainingTime
+        )
+    }
+
+    @Test
+    fun `known Bambu states are mapped`() {
+
+        assertEquals(
+            PrinterState.PREPARING,
+            PrinterState.fromGcodeState("PREPARE")
+        )
+
+        assertEquals(
+            PrinterState.PRINTING,
+            PrinterState.fromGcodeState("RUNNING")
+        )
+
+        assertEquals(
+            PrinterState.FINISHED,
+            PrinterState.fromGcodeState("FINISH")
+        )
+    }
+
+    @Test
+    fun `unknown Bambu state remains unknown`() {
+        assertEquals(
+            PrinterState.UNKNOWN,
+            PrinterState.fromGcodeState(
+                "SOME_FUTURE_STATE"
+            )
+        )
+    }
+
+    @Test
+    fun `RUNNING to PAUSE emits paused`() {
+
+        val tracker =
+            PrinterStatusTracker()
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "PREPARE",
+            "job_id": "job-1"
+          }
+        }
+        """.trimIndent()
+        )
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "RUNNING"
+          }
+        }
+        """.trimIndent()
+        )
+
+        val events =
+            tracker.update(
+                """
+            {
+              "print": {
+                "gcode_state": "PAUSE"
+              }
+            }
+            """.trimIndent()
+            )
+
+        assertTrue(
+            events.any {
+                it is BambuEvent.PrinterPaused
+            }
+        )
+
+        assertEquals(
+            PrinterState.PAUSED,
+            tracker.snapshot.state
+        )
+    }
+
+    @Test
+    fun `PAUSE to RUNNING emits resumed and not started`() {
+
+        val tracker =
+            PrinterStatusTracker()
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "PREPARE",
+            "job_id": "job-1"
+          }
+        }
+        """.trimIndent()
+        )
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "RUNNING"
+          }
+        }
+        """.trimIndent()
+        )
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "PAUSE"
+          }
+        }
+        """.trimIndent()
+        )
+
+        val events =
+            tracker.update(
+                """
+            {
+              "print": {
+                "gcode_state": "RUNNING"
+              }
+            }
+            """.trimIndent()
+            )
+
+        assertTrue(
+            events.any {
+                it is BambuEvent.PrinterResumed
+            }
+        )
+
+        assertFalse(
+            events.any {
+                it is BambuEvent.PrinterStarted
+            }
+        )
+
+        assertEquals(
+            PrinterState.PRINTING,
+            tracker.snapshot.state
         )
     }
 }

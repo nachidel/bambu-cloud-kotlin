@@ -2,6 +2,7 @@ package com.nachidel.bambu.internal
 
 import com.nachidel.bambu.event.BambuEvent
 import com.nachidel.bambu.model.PrinterSnapshot
+import com.nachidel.bambu.model.PrinterState
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
@@ -100,9 +101,14 @@ internal class PrinterStatusTracker {
                 current
             }
 
-        val newState =
+        val newRawGcodeState =
             print.stringValue("gcode_state")
-                ?: base.gcodeState
+                ?: base.rawGcodeState
+
+        val newState =
+            PrinterState.fromGcodeState(
+                newRawGcodeState
+            )
 
         val newJobId =
             incomingJobId
@@ -133,7 +139,8 @@ internal class PrinterStatusTracker {
                 ?: base.remainingTime
 
         return base.copy(
-            gcodeState = newState,
+            state = newState,
+            rawGcodeState = newRawGcodeState,
             jobId = newJobId,
             subtaskName = newSubtaskName,
             percent = newPercent,
@@ -150,53 +157,85 @@ internal class PrinterStatusTracker {
         events: MutableList<BambuEvent>
     ) {
 
-        val newState =
-            current.gcodeState
-                ?: return
-
-        /*
-         * Premier état connu après connexion / pushall.
-         *
-         * Il initialise le tracker mais ne génère PAS
-         * PrinterStarted / PrinterPreparing / PrinterFinished.
-         *
-         * Cela évite un faux démarrage si le programme
-         * est lancé alors qu'une impression est déjà en cours.
-         */
         if (!stateInitialized) {
-
             stateInitialized = true
-
             return
         }
 
         val previousState =
-            previous.gcodeState
+            previous.state
 
-        if (previousState == newState) {
+        val currentState =
+            current.state
+
+        if (previousState == currentState) {
             return
         }
 
-        when (newState) {
+        when {
 
-            "PREPARE" -> {
+            /*
+             * Nouveau travail en préparation.
+             */
+            currentState == PrinterState.PREPARING -> {
+
                 events +=
                     BambuEvent.PrinterPreparing(
-                        snapshot = current
+                        current
                     )
             }
 
-            "RUNNING" -> {
+            /*
+             * PREPARE -> RUNNING
+             *
+             * C'est le véritable début d'impression
+             * observé sur la H2C.
+             */
+            previousState == PrinterState.PREPARING &&
+                    currentState == PrinterState.PRINTING -> {
+
                 events +=
                     BambuEvent.PrinterStarted(
-                        snapshot = current
+                        current
                     )
             }
 
-            "FINISH" -> {
+            /*
+             * RUNNING -> PAUSE
+             *
+             * Observé réellement sur la H2C.
+             */
+            previousState == PrinterState.PRINTING &&
+                    currentState == PrinterState.PAUSED -> {
+
+                events +=
+                    BambuEvent.PrinterPaused(
+                        current
+                    )
+            }
+
+            /*
+             * PAUSE -> RUNNING
+             *
+             * C'est une reprise, PAS un nouveau démarrage.
+             */
+            previousState == PrinterState.PAUSED &&
+                    currentState == PrinterState.PRINTING -> {
+
+                events +=
+                    BambuEvent.PrinterResumed(
+                        current
+                    )
+            }
+
+            /*
+             * Transition vers FINISH.
+             */
+            currentState == PrinterState.FINISHED -> {
+
                 events +=
                     BambuEvent.PrinterFinished(
-                        snapshot = current
+                        current
                     )
             }
         }

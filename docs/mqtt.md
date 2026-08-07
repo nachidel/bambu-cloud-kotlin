@@ -1,12 +1,24 @@
-## MQTT payloads
+## Print state transitions observed on H2C
 
-Bambu Lab MQTT messages may contain either a complete printer state
-or only a partial update.
+The following transitions have been observed directly on a Bambu Lab H2C:
 
-The SDK therefore maintains a local printer snapshot and applies
-incoming MQTT messages as patches.
+| Raw `gcode_state` | SDK state | Meaning |
+|---|---|---|
+| `PREPARE` | `PREPARING` | Print preparation |
+| `RUNNING` | `PRINTING` | Printing |
+| `PAUSE` | `PAUSED` | Print paused |
+| `FINISH` | `FINISHED` | Print finished |
 
-Examples:
+Observed transitions:
 
-- `samples/mqtt-full-status.json`
-- `samples/mqtt-partial-status.json`
+PREPARE -> RUNNING
+PrinterStarted
+
+RUNNING -> PAUSE
+PrinterPaused
+
+PAUSE -> RUNNING
+PrinterResumed
+
+RUNNING -> FINISH
+PrinterFinished

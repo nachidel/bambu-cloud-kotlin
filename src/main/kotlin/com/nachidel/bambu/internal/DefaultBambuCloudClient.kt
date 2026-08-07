@@ -14,6 +14,11 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import com.nachidel.bambu.auth.AuthenticationResult
 import com.nachidel.bambu.auth.AuthenticationService
+import com.nachidel.bambu.exception.BambuAuthenticationException
+import com.nachidel.bambu.model.Printer
+import com.nachidel.bambu.model.PrinterState
+import com.nachidel.bambu.model.PrinterType
+import com.nachidel.bambu.value.SerialNumber
 
 class DefaultBambuCloudClient(
     private val configuration: BambuConfiguration
@@ -157,20 +162,47 @@ class DefaultBambuCloudClient(
         mqtt.connect()
     }
 
+    override suspend fun printers(): List<Printer> {
+
+        val token =
+            configuration.accessToken
+                ?: throw BambuAuthenticationException(
+                    "An access token is required to list printers"
+                )
+
+        return discovery
+            .getDevices(token.value)
+            .map { device ->
+
+                Printer(
+                    serial = SerialNumber(device.id),
+                    name = device.name,
+                    type = PrinterType.fromProductName(
+                        device.productName
+                    ),
+                    state =
+                        if (device.online) {
+                            PrinterState.UNKNOWN
+                        } else {
+                            PrinterState.OFFLINE
+                        }
+                )
+            }
+    }
 
     private fun selectDevice(
         devices: List<CloudDevice>
     ): CloudDevice {
 
         val requestedPrinter =
-            configuration.printerId
+            configuration.printer
 
         if (requestedPrinter != null) {
 
             return devices.firstOrNull {
-                it.id == requestedPrinter
+                it.id == requestedPrinter.value
             } ?: error(
-                "Printer '$requestedPrinter' is not linked to this account"
+                "Printer '${requestedPrinter.value}' is not linked to this account"
             )
         }
 
@@ -178,13 +210,9 @@ class DefaultBambuCloudClient(
             return devices.first()
         }
 
-        /*
-         * Pour l'instant on refuse de choisir arbitrairement
-         * si le compte possède plusieurs imprimantes.
-         */
         error(
             "Multiple printers are linked to this account. " +
-                    "Set printerId in BambuConfiguration."
+                    "Set printer in BambuConfiguration."
         )
     }
 
