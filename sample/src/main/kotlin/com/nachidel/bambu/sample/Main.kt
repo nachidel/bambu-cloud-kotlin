@@ -1,4 +1,4 @@
-package com.nachidel.bambu
+package com.nachidel.bambu.sample
 
 import com.nachidel.bambu.api.BambuCloudClient
 import com.nachidel.bambu.event.BambuEvent
