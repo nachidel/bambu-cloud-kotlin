@@ -1,0 +1,8 @@
+{
+  "accessToken": "<ACCESS_TOKEN>",
+  "refreshToken": "<REFRESH_TOKEN>",
+  "loginType": "password",
+  "tfaKey": null,
+  "message": null,
+  "code": null
+}

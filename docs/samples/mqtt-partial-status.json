@@ -1,0 +1,8 @@
+{
+  "print": {
+    "command": "push_status",
+    "percent": 91,
+    "layer_num": 128,
+    "remain_time": 13
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "uid": 1234567890,
+  "name": "example-user",
+  "handle": "example-user",
+  "avatar": "https://example.invalid/avatar.png",
+  "bio": "",
+  "deviceNames": [
+    "Bambu Lab H2C"
+  ],
+  "deviceLiveView": 1,
+  "printSuccess": 1,
+  "printError": 1,
+  "noticePrintSuccess": 1,
+  "noticePrintProgress": 0,
+  "noticePrintError": 1
+}
