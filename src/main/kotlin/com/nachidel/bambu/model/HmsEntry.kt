@@ -5,7 +5,7 @@ data class HmsEntry(
     val code: Long? = null
 ) {
 
-    val fullCode: String?
+    val fullCode: BambuErrorCode?
         get() {
 
             val attr =
@@ -14,9 +14,11 @@ data class HmsEntry(
             val code =
                 code ?: return null
 
-            return "%08X%08X".format(
-                attr,
-                code
+            return BambuErrorCode.fromHex(
+                "%08X%08X".format(
+                    attr and 0xFFFFFFFFL,
+                    code and 0xFFFFFFFFL
+                )
             )
         }
 }

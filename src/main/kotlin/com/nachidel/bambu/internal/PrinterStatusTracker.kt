@@ -9,15 +9,14 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.nachidel.bambu.model.HmsEntry
-import com.nachidel.bambu.model.PauseReason
 import com.nachidel.bambu.model.PrinterDiagnostics
 import com.nachidel.bambu.model.PrinterIssueDetector
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
+import com.nachidel.bambu.model.PrinterDiagnosticCodeResolver
 
 internal class PrinterStatusTracker {
 
@@ -77,14 +76,50 @@ internal class PrinterStatusTracker {
             mutableListOf<BambuEvent>()
 
         /*
-         * Les transitions d'état restent traitées
-         * indépendamment de PrinterStatusChanged.
+         * On mémorise si le tracker était déjà synchronisé
+         * AVANT de traiter ce nouveau snapshot.
+         *
+         * Le premier snapshot sert uniquement à synchroniser
+         * l'état local et ne doit pas déclencher artificiellement
+         * un événement diagnostic.
          */
+        val wasInitialized =
+            stateInitialized
+
         handleStateTransition(
             previous = previousSnapshot,
             current = newSnapshot,
             events = events
         )
+
+        /*
+         * Les codes de diagnostic peuvent évoluer sans que
+         * l'état de l'impression change.
+         *
+         * Exemple réellement important :
+         *
+         * FAILED
+         * print_error = 0
+         *
+         * puis plus tard :
+         *
+         * FAILED
+         * print_error = 50348044
+         *
+         * soit 0300400C = tâche annulée.
+         */
+        if (
+            wasInitialized &&
+            hasDiagnosticsChanged(
+                previous = previousSnapshot.diagnostics,
+                current = newSnapshot.diagnostics
+            )
+        ) {
+            events +=
+                BambuEvent.PrinterDiagnosticsChanged(
+                    snapshot = newSnapshot
+                )
+        }
 
         /*
          * On ne publie PrinterStatusChanged que
@@ -125,27 +160,55 @@ internal class PrinterStatusTracker {
         val incomingJobId =
             print.stringValue("job_id")
 
+        val incomingSubtaskName =
+            print.stringValue("subtask_name")
+
+        val incomingRawGcodeState =
+            print.stringValue("gcode_state")
+
         val jobChanged =
             incomingJobId != null &&
                     current.jobId != null &&
                     incomingJobId != current.jobId
 
         /*
-         * Nouveau job :
-         * on efface toutes les informations appartenant
-         * à l'impression précédente.
+         * PREPARE est également une frontière fiable
+         * entre deux impressions.
+         *
+         * On réinitialise à l'entrée dans PREPARE afin
+         * d'éviter de conserver les couches/progression
+         * de l'impression précédente.
          */
+        val enteringPrepare =
+            incomingRawGcodeState
+                ?.equals(
+                    "PREPARE",
+                    ignoreCase = true
+                ) == true &&
+                    current.state != PrinterState.PREPARING
+
         val base =
-            if (jobChanged) {
+            if (
+                jobChanged ||
+                enteringPrepare
+            ) {
+
                 PrinterSnapshot(
-                    jobId = incomingJobId
+                    jobId =
+                        incomingJobId
+                            ?: current.jobId,
+
+                    subtaskName =
+                        incomingSubtaskName
+                            ?: current.subtaskName
                 )
+
             } else {
                 current
             }
 
         val newRawGcodeState =
-            print.stringValue("gcode_state")
+            incomingRawGcodeState
                 ?: base.rawGcodeState
 
         val newState =
@@ -158,7 +221,7 @@ internal class PrinterStatusTracker {
                 ?: base.jobId
 
         val newSubtaskName =
-            print.stringValue("subtask_name")
+            incomingSubtaskName
                 ?: base.subtaskName
 
         val newPercent =
@@ -327,9 +390,20 @@ internal class PrinterStatusTracker {
              * C'est le véritable début d'impression
              * observé sur la H2C.
              */
-            previousState == PrinterState.PREPARING &&
-                    currentState == PrinterState.PRINTING -> {
+            currentState == PrinterState.PRINTING &&
+                    previousState != PrinterState.PAUSED -> {
 
+                /*
+                 * RUNNING confirme qu'une impression est en cours.
+                 *
+                 * PREPARE peut ne pas avoir été observé.
+                 * Dans ce cas, par exemple FINISHED -> RUNNING,
+                 * on considère quand même qu'une nouvelle impression
+                 * vient de démarrer.
+                 *
+                 * PAUSED -> RUNNING est exclu ici car il s'agit
+                 * d'une reprise et non d'un nouveau démarrage.
+                 */
                 events +=
                     BambuEvent.PrinterStarted(
                         current
@@ -371,7 +445,11 @@ internal class PrinterStatusTracker {
             /*
              * Transition vers FINISH.
              */
-            currentState == PrinterState.FINISHED -> {
+            currentState == PrinterState.FINISHED &&
+                    (
+                            previousState == PrinterState.PRINTING ||
+                                    previousState == PrinterState.PAUSED
+                            ) -> {
 
                 events +=
                     BambuEvent.PrinterFinished(
@@ -387,6 +465,27 @@ internal class PrinterStatusTracker {
                     )
             }
         }
+    }
+
+    private fun hasDiagnosticsChanged(
+        previous: PrinterDiagnostics,
+        current: PrinterDiagnostics
+    ): Boolean {
+
+        /*
+         * On compare les codes normalisés plutôt que
+         * PrinterDiagnostics en entier.
+         *
+         * Cela évite notamment de considérer :
+         *
+         * null -> "0"
+         *
+         * comme l'apparition d'une erreur.
+         */
+        return PrinterDiagnosticCodeResolver
+            .resolve(previous) !=
+                PrinterDiagnosticCodeResolver
+                    .resolve(current)
     }
 
     private fun hasStatusChanged(

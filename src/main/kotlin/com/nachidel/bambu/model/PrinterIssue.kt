@@ -14,6 +14,14 @@ sealed interface PrinterIssue {
         override val rawCode: String?
     ) : PrinterIssue
 
+    data class NozzleClogDetected(
+        override val rawCode: String?
+    ) : PrinterIssue
+
+    data class PrintCancelled(
+        override val rawCode: String?
+    ) : PrinterIssue
+
     data class Unknown(
         override val rawCode: String?
     ) : PrinterIssue
