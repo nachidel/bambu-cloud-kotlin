@@ -4,12 +4,22 @@ import com.nachidel.bambu.api.BambuCloudClient
 import com.nachidel.bambu.auth.AuthenticationResult
 import com.nachidel.bambu.event.BambuEvent
 import com.nachidel.bambu.exception.BambuAuthenticationException
+import com.nachidel.bambu.model.PrinterDiagnosticCatalogResolver
+import com.nachidel.bambu.model.PrinterDiagnosticCode
 import com.nachidel.bambu.model.PrinterIssue
 import com.nachidel.bambu.model.PrinterState
 import com.nachidel.bambu.model.PrinterType
 import com.nachidel.bambu.value.AccessToken
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
 import java.util.concurrent.atomic.AtomicBoolean
+
+private val logger =
+    LoggerFactory.getLogger("BambuSample")
 
 fun main(): Unit = runBlocking {
 
@@ -33,8 +43,7 @@ fun main(): Unit = runBlocking {
 
     fun closeClient() {
         if (closed.compareAndSet(false, true)) {
-            println()
-            println("Fermeture du client Bambu...")
+            logger.info("Fermeture du client Bambu...")
             bambu.close()
         }
     }
@@ -42,153 +51,245 @@ fun main(): Unit = runBlocking {
     Runtime.getRuntime().addShutdownHook(
         Thread {
             closeClient()
-        })
+        }
+    )
 
     try {
 
-        val eventJob = launch(Dispatchers.Default) {
+        val diagnosticCatalogResolver =
+            PrinterDiagnosticCatalogResolver()
 
-            bambu.events.collect { event ->
+        val eventJob =
+            launch(Dispatchers.Default) {
 
-                when (event) {
+                bambu.events.collect { event ->
 
-                    BambuEvent.PrinterConnected -> {
-                        println(">>> CONNECTE AU CLOUD BAMBU")
-                    }
+                    when (event) {
 
-                    is BambuEvent.PrinterDisconnected -> {
-                        println(
-                            ">>> DECONNECTE : " + "${event.cause?.message ?: "cause inconnue"}"
-                        )
-                    }
+                        BambuEvent.PrinterConnected -> {
+                            logger.info("Connecte au cloud Bambu")
+                        }
 
-                    is BambuEvent.PrinterPreparing -> {
-                        println(
-                            ">>> PREPARATION : " + "${event.snapshot.subtaskName}"
-                        )
-                    }
+                        is BambuEvent.PrinterDisconnected -> {
+                            logger.warn(
+                                "Deconnecte du cloud Bambu : {}",
+                                event.cause?.message ?: "cause inconnue"
+                            )
+                        }
 
-                    is BambuEvent.PrinterStarted -> {
-                        println(
-                            ">>> IMPRESSION DEMARREE : " + "${event.snapshot.subtaskName}"
-                        )
-                    }
+                        is BambuEvent.PrinterPreparing -> {
+                            logger.info(
+                                "Preparation : {}",
+                                event.snapshot.subtaskName
+                            )
+                        }
 
-                    is BambuEvent.PrinterFinished -> {
-                        println(
-                            ">>> IMPRESSION TERMINEE : " + "${event.snapshot.subtaskName}"
-                        )
-                    }
+                        is BambuEvent.PrinterStarted -> {
+                            logger.info(
+                                "Impression demarree : {}",
+                                event.snapshot.subtaskName
+                            )
+                        }
 
-                    is BambuEvent.PrinterStatusChanged -> {
+                        is BambuEvent.PrinterFinished -> {
+                            logger.info(
+                                "Impression terminee : {}",
+                                event.snapshot.subtaskName
+                            )
+                        }
 
-                        val s = event.snapshot
+                        is BambuEvent.PrinterStatusChanged -> {
 
-                        if (
-                            s.state == PrinterState.PAUSED ||
-                            s.state == PrinterState.FAILED
-                        ) {
+                            val s = event.snapshot
 
-                            val d =
-                                s.diagnostics
+                            if (
+                                s.state == PrinterState.PAUSED ||
+                                s.state == PrinterState.FAILED
+                            ) {
 
-                            println(
-                                ">>> DIAG | " +
-                                        "stage=${d.stageCurrent} | " +
-                                        "mcStage=${d.machineStage} | " +
-                                        "printStage=${d.printStage} | " +
-                                        "subStage=${d.printSubStage} | " +
-                                        "jobState=${d.jobState} | " +
-                                        "state=${d.machineState} | " +
-                                        "mcAction=${d.machineAction} | " +
-                                        "gcodeAction=${d.gcodeAction}"
+                                val d = s.diagnostics
+
+                                logger.debug(
+                                    "DIAG stage={} mcStage={} printStage={} subStage={} jobState={} state={} mcAction={} gcodeAction={}",
+                                    d.stageCurrent,
+                                    d.machineStage,
+                                    d.printStage,
+                                    d.printSubStage,
+                                    d.jobState,
+                                    d.machineState,
+                                    d.machineAction,
+                                    d.gcodeAction
+                                )
+
+                                logger.debug(
+                                    "ERROR msg={} print={} mc={} fail={} err={} err2={} xcam={}",
+                                    d.messageCode,
+                                    d.printErrorCode,
+                                    d.machinePrintErrorCode,
+                                    d.failReason,
+                                    d.errorCode,
+                                    d.secondaryErrorCode,
+                                    d.xcamStatus
+                                )
+
+                                logger.debug(
+                                    "HMS {}",
+                                    d.hms.joinToString {
+                                        "attr=${it.attr},code=${it.code}"
+                                    }
+                                )
+                            }
+
+                            logger.debug(
+                                "Etat={} Bambu={} Progression={}% Couche={}/{} Restant={} Projet={}",
+                                s.state,
+                                s.rawGcodeState,
+                                s.percent,
+                                s.currentLayer,
+                                s.totalLayers,
+                                s.remainingTime,
+                                s.subtaskName
+                            )
+                        }
+
+                        is BambuEvent.PrinterPaused -> {
+
+                            logger.warn(
+                                "Impression en pause : {}",
+                                event.snapshot.subtaskName
                             )
 
-                            println(
-                                ">>> ERROR | " +
-                                        "msg=${d.messageCode} | " +
-                                        "print=${d.printErrorCode} | " +
-                                        "mc=${d.machinePrintErrorCode} | " +
-                                        "fail=${d.failReason} | " +
-                                        "err=${d.errorCode} | " +
-                                        "err2=${d.secondaryErrorCode} | " +
-                                        "xcam=${d.xcamStatus}"
-                            )
+                            when (val issue = event.issue) {
 
-                            println(
-                                ">>> HMS | " +
-                                        d.hms.joinToString {
-                                            "attr=${it.attr},code=${it.code}"
+                                is PrinterIssue.FilamentRunout -> {
+                                    logger.warn(
+                                        "Cause : filament epuise [{}]",
+                                        issue.rawCode
+                                    )
+                                }
+
+                                is PrinterIssue.ForeignObjectOnBuildPlate -> {
+                                    logger.warn(
+                                        "Cause : objet detecte sur le plateau [{}]",
+                                        issue.rawCode
+                                    )
+                                }
+
+                                is PrinterIssue.NozzleClogDetected -> {
+                                    logger.warn(
+                                        "Cause : obstruction de buse detectee [{}]",
+                                        issue.rawCode
+                                    )
+                                }
+
+                                is PrinterIssue.PrintCancelled -> {
+                                    logger.warn(
+                                        "Cause : impression annulee [{}]",
+                                        issue.rawCode
+                                    )
+                                }
+
+                                is PrinterIssue.Unknown -> {
+                                    logger.warn(
+                                        "Cause inconnue [{}]",
+                                        issue.rawCode
+                                    )
+                                }
+
+                                null -> {
+                                    logger.warn(
+                                        "Aucune cause identifiee pour la pause"
+                                    )
+                                }
+                            }
+                        }
+
+                        is BambuEvent.PrinterResumed -> {
+                            logger.info(
+                                "Impression reprise : {}",
+                                event.snapshot.subtaskName
+                            )
+                        }
+
+                        is BambuEvent.PrinterFailed -> {
+                            logger.error(
+                                "Impression interrompue : {}",
+                                event.snapshot.subtaskName
+                            )
+                        }
+
+                        is BambuEvent.PrinterDiagnosticsChanged -> {
+
+                            val matches =
+                                diagnosticCatalogResolver.resolve(
+                                    event.snapshot.diagnostics
+                                )
+
+                            if (matches.isEmpty()) {
+
+                                logger.info(
+                                    "Diagnostic : plus aucun code actif"
+                                )
+
+                            } else {
+
+                                matches.forEach { match ->
+
+                                    val diagnostic =
+                                        match.diagnostic
+
+                                    val historical =
+                                        diagnostic.source ==
+                                                PrinterDiagnosticCode.Source.FAIL_REASON
+
+                                    if (historical) {
+                                        logger.warn(
+                                            "Diagnostic [{}] code={} (historique possible)",
+                                            diagnostic.source,
+                                            diagnostic.code.value
+                                        )
+                                    } else {
+                                        logger.warn(
+                                            "Diagnostic [{}] code={}",
+                                            diagnostic.source,
+                                            diagnostic.code.value
+                                        )
+                                    }
+
+                                    val message =
+                                        match.unambiguousMessage
+
+                                    when {
+
+                                        message != null -> {
+                                            logger.warn(
+                                                "Diagnostic Bambu : {}",
+                                                message
+                                            )
                                         }
-                            )
+
+                                        match.messages.isNotEmpty() -> {
+                                            match.messages.forEach { possibleMessage ->
+                                                logger.warn(
+                                                    "Diagnostic Bambu possible : {}",
+                                                    possibleMessage
+                                                )
+                                            }
+                                        }
+
+                                        else -> {
+                                            logger.debug(
+                                                "Aucune description HMS connue pour {}",
+                                                diagnostic.code.value
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
-
-
-                        println(
-                            ">>> Etat=${s.state} | " +
-                                    "Bambu=${s.rawGcodeState} | " +
-                                    "Progression=${s.percent}% | " +
-                                    "Couche=${s.currentLayer}/${s.totalLayers} | " +
-                                    "Restant=${s.remainingTime} | " +
-                                    "Projet=${s.subtaskName}"
-                        )
-                       /* println(
-                            ">>> Etat=${s.state} | " + "Progression=${s.percent}% | " + "Couche=${s.currentLayer}/${s.totalLayers} | " + "Restant=${s.remainingTime} | " + "Projet=${s.subtaskName}"
-                        )*/
-                    }
-
-                    is BambuEvent.PrinterPaused -> {
-
-                        println(
-                            ">>> IMPRESSION EN PAUSE : " +
-                                    event.snapshot.subtaskName
-                        )
-
-                        when (val issue = event.issue) {
-
-                            is PrinterIssue.FilamentRunout ->
-                                println(
-                                    ">>> CAUSE : FILAMENT EPUISE " +
-                                            "[${issue.rawCode}]"
-                                )
-
-                            is PrinterIssue.ForeignObjectOnBuildPlate ->
-                                println(
-                                    ">>> CAUSE : OBJET DETECTE SUR LE PLATEAU " +
-                                            "[${issue.rawCode}]"
-                                )
-
-                            is PrinterIssue.Unknown ->
-                                println(
-                                    ">>> CAUSE : INCONNUE " +
-                                            "[${issue.rawCode}]"
-                                )
-
-                            null ->
-                                println(
-                                    ">>> CAUSE : AUCUNE CAUSE IDENTIFIEE"
-                                )
-                        }
-                    }
-
-                    is BambuEvent.PrinterResumed -> {
-
-                        println(
-                            ">>> IMPRESSION REPRISE : " +
-                                    "${event.snapshot.subtaskName}"
-                        )
-                    }
-
-                    is BambuEvent.PrinterFailed -> {
-
-                        println(
-                            ">>> IMPRESSION INTERROMPUE : " +
-                                    "${event.snapshot.subtaskName}"
-                        )
                     }
                 }
             }
-        }
 
         if (existingToken == null) {
 
@@ -198,18 +299,14 @@ fun main(): Unit = runBlocking {
                     ?.takeIf {
                         it.isNotEmpty()
                     }
-                    ?: error(
-                        "BAMBU_EMAIL absent"
-                    )
+                    ?: error("BAMBU_EMAIL absent")
 
             val password =
                 System.getenv("BAMBU_PASSWORD")
                     ?.takeIf {
                         it.isNotEmpty()
                     }
-                    ?: error(
-                        "BAMBU_PASSWORD absent"
-                    )
+                    ?: error("BAMBU_PASSWORD absent")
 
             when (
                 val result =
@@ -220,26 +317,18 @@ fun main(): Unit = runBlocking {
             ) {
 
                 is AuthenticationResult.Authenticated -> {
-
-                    println(
-                        "Authentification reussie."
-                    )
+                    logger.info("Authentification reussie")
                 }
 
                 AuthenticationResult.VerificationCodeRequired -> {
 
-                    println(
-                        "Code de verification demande."
-                    )
+                    logger.info("Code de verification demande")
 
-                    print(
-                        "Code recu par email : "
-                    )
+                    print("Code recu par email : ")
 
                     val code =
                         withContext(Dispatchers.IO) {
-                            readln()
-                                .trim()
+                            readln().trim()
                         }
 
                     when (
@@ -251,21 +340,16 @@ fun main(): Unit = runBlocking {
                     ) {
 
                         is AuthenticationResult.Authenticated -> {
-
-                            println(
-                                "Verification reussie."
-                            )
+                            logger.info("Verification reussie")
                         }
 
                         AuthenticationResult.VerificationCodeRequired -> {
-
                             error(
                                 "Un nouveau code de verification est demande."
                             )
                         }
 
                         is AuthenticationResult.Rejected -> {
-
                             error(
                                 "Verification refusee : " +
                                         "${verification.code} - " +
@@ -276,15 +360,12 @@ fun main(): Unit = runBlocking {
                 }
 
                 is AuthenticationResult.Rejected -> {
-
                     error(
                         "Authentification refusee : " +
                                 "${result.code} - " +
                                 "${result.message}"
                     )
                 }
-
-
             }
         }
 
@@ -296,49 +377,56 @@ fun main(): Unit = runBlocking {
                 it.type == PrinterType.H2C
             }
 
-        println("Imprimantes liees au compte :")
-
-        printers.forEach { printer ->
-            println(
-                "- ${printer.name} | " +
-                        "${printer.type} | " +
-                        "${printer.serial} | " +
-                        "${printer.state}"
+        if (h2c == null) {
+            logger.warn(
+                "Aucune H2C trouvee parmi les imprimantes liees au compte"
             )
         }
 
-        println()
+        logger.info(
+            "Imprimantes liees au compte : {}",
+            printers.size
+        )
+
+        printers.forEach { printer ->
+            logger.info(
+                "{} | {} | {} | {}",
+                printer.name,
+                printer.type,
+                printer.serial,
+                printer.state
+            )
+        }
 
         try {
-            println("Connexion a Bambu Cloud...")
+
+            logger.info("Connexion a Bambu Cloud...")
             bambu.connect()
+
         } catch (
             e: BambuAuthenticationException
         ) {
 
-            println(
-                "Le token Bambu n'est plus valide."
-            )
-
-            println(
-                "Une nouvelle authentification est necessaire."
+            logger.error(
+                "Le token Bambu n'est plus valide. Une nouvelle authentification est necessaire."
             )
 
             return@runBlocking
         }
 
-        println("Client actif.")
-        println("Tape q puis Entree pour quitter.")
+        logger.info(
+            "Client actif - tape q puis Entree pour quitter"
+        )
 
-        /*
-         * Lecture clavier sur Dispatchers.IO :
-         * on ne bloque pas le thread des coroutines.
-         */
         withContext(Dispatchers.IO) {
 
             while (true) {
 
-                val command = readlnOrNull()?.trim()?.lowercase() ?: break
+                val command =
+                    readlnOrNull()
+                        ?.trim()
+                        ?.lowercase()
+                        ?: break
 
                 if (command == "q") {
                     break
@@ -346,13 +434,8 @@ fun main(): Unit = runBlocking {
             }
         }
 
-        println("Arret demande...")
+        logger.info("Arret demande...")
 
-        /*
-         * IMPORTANT :
-         * le collect() sur un SharedFlow est infini.
-         * Il faut donc annuler sa coroutine.
-         */
         eventJob.cancelAndJoin()
 
     } finally {

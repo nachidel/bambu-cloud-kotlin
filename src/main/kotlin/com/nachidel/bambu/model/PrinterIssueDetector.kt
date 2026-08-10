@@ -6,29 +6,43 @@ object PrinterIssueDetector {
         diagnostics: PrinterDiagnostics
     ): PrinterIssue? {
 
+        /*
+         * Erreur active de l'impression.
+         *
+         * Les valeurs MQTT sont observées
+         * sous forme décimale.
+         */
         val printError =
-            BambuErrorCode.fromRaw(
+            BambuErrorCode.fromDiagnostic(
                 diagnostics.printErrorCode
             )
 
-        /*
-         * Observé lors du manque de filament.
-         */
-        if (printError?.value == "07008011") {
-            return PrinterIssue.FilamentRunout(
-                rawCode = printError.value
-            )
+        when (printError?.value) {
+
+            "0300400C" ->
+                return PrinterIssue.PrintCancelled(
+                    rawCode = printError.value
+                )
+
+            "0C00803F" ->
+                return PrinterIssue.NozzleClogDetected(
+                    rawCode = printError.value
+                )
+
+            "07008011" ->
+                return PrinterIssue.FilamentRunout(
+                    rawCode = printError.value
+                )
         }
 
         /*
-         * Observé lors de la détection
-         * d'une pièce sur le plateau.
+         * fail_reason semble pouvoir conserver
+         * une ancienne valeur sur la H2C.
          *
-         * Attention : fail_reason semble persistant,
-         * donc cette valeur reste un fallback.
+         * On ne l'utilise donc qu'en fallback.
          */
         val failReason =
-            BambuErrorCode.fromRaw(
+            BambuErrorCode.fromDiagnostic(
                 diagnostics.failReason
             )
 

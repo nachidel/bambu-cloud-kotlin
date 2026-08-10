@@ -7,14 +7,23 @@ value class BambuErrorCode(
 
     val isNone: Boolean
         get() =
-            value == "00000000"
+            value.all { it == '0' }
 
     override fun toString(): String =
         value
 
     companion object {
 
-        fun fromRaw(
+        /*
+         * Pour les champs MQTT tels que :
+         *
+         * print_error
+         * fail_reason
+         * mc_print_error_code
+         *
+         * Ceux-ci sont observés sous forme décimale.
+         */
+        fun fromDiagnostic(
             raw: String?
         ): BambuErrorCode? {
 
@@ -24,30 +33,51 @@ value class BambuErrorCode(
                     ?.takeIf { it.isNotEmpty() }
                     ?: return null
 
-            /*
-             * Bambu nous transmet ici fail_reason
-             * sous forme décimale.
-             *
-             * Exemple :
-             * 83918958 -> 0500806E
-             */
-            value.toLongOrNull()?.let { decimal ->
+            val decimal =
+                value.toLongOrNull()
+
+            if (decimal != null) {
 
                 return BambuErrorCode(
                     "%08X".format(decimal)
                 )
             }
 
-            /*
-             * On accepte également un éventuel
-             * code déjà transmis en hexadécimal.
-             */
+            return fromHex(value)
+        }
+
+        /*
+         * Pour un ecode provenant du catalogue HMS
+         * ou pour HmsEntry.fullCode.
+         */
+        fun fromHex(
+            raw: String?
+        ): BambuErrorCode? {
+
+            val cleaned =
+                raw
+                    ?.trim()
+                    ?.removePrefix("0x")
+                    ?.removePrefix("0X")
+                    ?.uppercase()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: return null
+
+            if (
+                cleaned.any {
+                    it !in '0'..'9' &&
+                            it !in 'A'..'F'
+                }
+            ) {
+                return null
+            }
+
             return BambuErrorCode(
-                value
-                    .removePrefix("0x")
-                    .removePrefix("0X")
-                    .uppercase()
-                    .padStart(8, '0')
+                if (cleaned.length <= 8) {
+                    cleaned.padStart(8, '0')
+                } else {
+                    cleaned
+                }
             )
         }
     }

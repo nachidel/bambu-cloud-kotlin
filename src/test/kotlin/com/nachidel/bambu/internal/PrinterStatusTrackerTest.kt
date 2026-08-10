@@ -2,7 +2,6 @@ package com.nachidel.bambu.internal
 
 import com.nachidel.bambu.event.BambuEvent
 import com.nachidel.bambu.model.BambuErrorCode
-import com.nachidel.bambu.model.PauseReason
 import com.nachidel.bambu.model.PrinterDiagnostics
 import com.nachidel.bambu.model.PrinterIssue
 import com.nachidel.bambu.model.PrinterIssueDetector
@@ -632,6 +631,12 @@ class PrinterStatusTrackerTest {
             }
         )
 
+        assertTrue(
+            events.any {
+                it is BambuEvent.PrinterDiagnosticsChanged
+            }
+        )
+
         assertEquals(
             2,
             tracker.snapshot
@@ -651,7 +656,7 @@ class PrinterStatusTrackerTest {
     fun `decimal fail reason is converted to Bambu hexadecimal code`() {
 
         val code =
-            BambuErrorCode.fromRaw(
+            BambuErrorCode.fromDiagnostic(
                 "83918958"
             )
 
@@ -662,34 +667,47 @@ class PrinterStatusTrackerTest {
     }
 
     @Test
-    fun `foreign object code maps to build plate pause reason`() {
+    fun `foreign object on build plate is detected`() {
 
         val diagnostics =
             PrinterDiagnostics(
+                printErrorCode = "0",
+                machinePrintErrorCode = "0",
                 failReason = "83918958"
             )
 
-        assertEquals(
-            PauseReason.FOREIGN_OBJECT_ON_BUILD_PLATE,
-            PauseReason.fromDiagnostics(
+        val issue =
+            PrinterIssueDetector.detect(
                 diagnostics
             )
+
+        assertTrue(
+            issue is PrinterIssue.ForeignObjectOnBuildPlate
+        )
+
+        assertEquals(
+            "0500806E",
+            issue?.rawCode
         )
     }
 
     @Test
-    fun `unknown pause reason remains unknown`() {
+    fun `no known issue returns null`() {
 
         val diagnostics =
             PrinterDiagnostics(
+                printErrorCode = "0",
+                machinePrintErrorCode = "0",
                 failReason = "0"
             )
 
-        assertEquals(
-            PauseReason.UNKNOWN,
-            PauseReason.fromDiagnostics(
+        val issue =
+            PrinterIssueDetector.detect(
                 diagnostics
             )
+
+        assertNull(
+            issue
         )
     }
 
@@ -739,6 +757,263 @@ class PrinterStatusTrackerTest {
         assertEquals(
             "0500806E",
             issue?.rawCode
+        )
+    }
+
+    @Test
+    fun `nozzle clog is detected from print error`() {
+
+        val diagnostics =
+            PrinterDiagnostics(
+                printErrorCode = "201359423"
+            )
+
+        val issue =
+            PrinterIssueDetector.detect(
+                diagnostics
+            )
+
+        assertTrue(
+            issue is PrinterIssue.NozzleClogDetected
+        )
+
+        assertEquals(
+            "0C00803F",
+            issue?.rawCode
+        )
+    }
+
+    @Test
+    fun `print cancellation is detected from print error`() {
+
+        val diagnostics =
+            PrinterDiagnostics(
+                printErrorCode = "50348044"
+            )
+
+        val issue =
+            PrinterIssueDetector.detect(
+                diagnostics
+            )
+
+        assertTrue(
+            issue is PrinterIssue.PrintCancelled
+        )
+
+        assertEquals(
+            "0300400C",
+            issue?.rawCode
+        )
+    }
+
+    @Test
+    fun `cancellation diagnostic arriving after FAILED emits diagnostics changed`() {
+
+        val tracker =
+            PrinterStatusTracker()
+
+        /*
+         * Synchronisation initiale.
+         */
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "RUNNING",
+            "job_id": "job-1"
+          }
+        }
+        """.trimIndent()
+        )
+
+        /*
+         * Première transition vers FAILED,
+         * sans code d'annulation.
+         */
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "FAILED",
+            "print_error": 0
+          }
+        }
+        """.trimIndent()
+        )
+
+        /*
+         * Le code d'annulation arrive ensuite alors
+         * que l'état reste FAILED.
+         */
+        val events =
+            tracker.update(
+                """
+            {
+              "print": {
+                "gcode_state": "FAILED",
+                "print_error": 50348044
+              }
+            }
+            """.trimIndent()
+            )
+
+        assertTrue(
+            events.any {
+                it is BambuEvent.PrinterDiagnosticsChanged
+            }
+        )
+
+        /*
+         * Aucun nouveau FAILED :
+         * l'état n'a pas changé.
+         */
+        assertFalse(
+            events.any {
+                it is BambuEvent.PrinterFailed
+            }
+        )
+
+        /*
+         * Pas non plus de changement d'état/progression.
+         */
+        assertFalse(
+            events.any {
+                it is BambuEvent.PrinterStatusChanged
+            }
+        )
+
+        assertEquals(
+            "50348044",
+            tracker.snapshot
+                .diagnostics
+                .printErrorCode
+        )
+    }
+
+    @Test
+    fun `transient FINISH before PREPARE does not emit finished`() {
+
+        val tracker =
+            PrinterStatusTracker()
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "FINISH",
+            "job_id": "old-job",
+            "subtask_name": "Old",
+            "layer_num": 143,
+            "total_layer_num": 143
+          }
+        }
+        """.trimIndent()
+        )
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "job_id": "new-job",
+            "subtask_name": "Cylindre"
+          }
+        }
+        """.trimIndent()
+        )
+
+        val staleFinishEvents =
+            tracker.update(
+                """
+            {
+              "print": {
+                "gcode_state": "FINISH",
+                "layer_num": 143,
+                "total_layer_num": 143
+              }
+            }
+            """.trimIndent()
+            )
+
+        assertFalse(
+            staleFinishEvents.any {
+                it is BambuEvent.PrinterFinished
+            }
+        )
+
+        val prepareEvents =
+            tracker.update(
+                """
+            {
+              "print": {
+                "gcode_state": "PREPARE",
+                "total_layer_num": 10
+              }
+            }
+            """.trimIndent()
+            )
+
+        assertTrue(
+            prepareEvents.any {
+                it is BambuEvent.PrinterPreparing
+            }
+        )
+
+        assertNull(
+            tracker.snapshot.currentLayer
+        )
+
+        assertEquals(
+            10,
+            tracker.snapshot.totalLayers
+        )
+    }
+
+    @Test
+    fun `FINISH to RUNNING emits started when PREPARE was missed`() {
+
+        val tracker =
+            PrinterStatusTracker()
+
+        tracker.update(
+            """
+        {
+          "print": {
+            "gcode_state": "FINISH",
+            "job_id": "old-job",
+            "subtask_name": "Old print"
+          }
+        }
+        """.trimIndent()
+        )
+
+        val events =
+            tracker.update(
+                """
+            {
+              "print": {
+                "gcode_state": "RUNNING",
+                "job_id": "new-job",
+                "subtask_name": "Cylindre",
+                "percent": 0
+              }
+            }
+            """.trimIndent()
+            )
+
+        assertTrue(
+            events.any {
+                it is BambuEvent.PrinterStarted
+            }
+        )
+
+        assertEquals(
+            PrinterState.PRINTING,
+            tracker.snapshot.state
+        )
+
+        assertEquals(
+            "new-job",
+            tracker.snapshot.jobId
         )
     }
 }
