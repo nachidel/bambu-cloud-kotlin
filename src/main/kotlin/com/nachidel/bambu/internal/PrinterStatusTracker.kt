@@ -261,6 +261,22 @@ internal class PrinterStatusTracker {
             print.doubleValue("bed_target_temper")
                 ?: base.bedTargetTemperature
 
+        /*
+         * Au lancement d'une impression, Bambu peut envoyer
+         * une URL signée vers le projet .3mf.
+         *
+         * On la conserve dans le snapshot afin que
+         * bambu-live-automation puisse télécharger la vignette
+         * immédiatement, avant expiration de l'URL.
+         */
+        val newProjectFileUrl =
+            print.stringValue("url")
+                ?: base.projectFileUrl
+
+        val newPlateIndex =
+            print.intValue("plate_idx")
+                ?: base.plateIndex
+
         val diagnostics =
             applyDiagnosticsPatch(
                 base = base.diagnostics,
@@ -280,6 +296,8 @@ internal class PrinterStatusTracker {
             nozzleTargetTemperature = newNozzleTargetTemperature,
             bedTemperature = newBedTemperature,
             bedTargetTemperature = newBedTargetTemperature,
+            projectFileUrl = newProjectFileUrl,
+            plateIndex = newPlateIndex,
             diagnostics = diagnostics
         )
     }
@@ -525,7 +543,9 @@ internal class PrinterStatusTracker {
                 previous.nozzleTemperature != current.nozzleTemperature ||
                 previous.nozzleTargetTemperature != current.nozzleTargetTemperature ||
                 previous.bedTemperature != current.bedTemperature ||
-                previous.bedTargetTemperature != current.bedTargetTemperature
+                previous.bedTargetTemperature != current.bedTargetTemperature ||
+                previous.projectFileUrl != current.projectFileUrl ||
+                previous.plateIndex != current.plateIndex
     }
 
     private fun parseHms(

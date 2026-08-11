@@ -38,6 +38,19 @@ data class PrinterSnapshot(
 
     val bedTargetTemperature: Double? = null,
 
+    /**
+     * URL signée du projet 3MF envoyée par Bambu au démarrage
+     * d'une impression. Elle est temporaire : le consommateur
+     * doit la télécharger dès qu'elle apparaît.
+     */
+    val projectFileUrl: String? = null,
+
+    /**
+     * Plateau réellement lancé dans le projet 3MF.
+     * Utilisé notamment pour choisir Metadata/plate_N.png.
+     */
+    val plateIndex: Int? = null,
+
     val diagnostics: PrinterDiagnostics =
         PrinterDiagnostics()
 )
