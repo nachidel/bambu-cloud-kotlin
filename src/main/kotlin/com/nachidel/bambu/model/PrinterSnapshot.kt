@@ -30,9 +30,36 @@ data class PrinterSnapshot(
      * Les valeurs restent null tant qu'elles n'ont pas encore
      * été reçues dans un push_status.
      */
+    /**
+     * Champs génériques Bambu au niveau racine du push_status.
+     * Leur association à une tête précise n'est volontairement
+     * pas déduite ici.
+     */
     val nozzleTemperature: Double? = null,
 
     val nozzleTargetTemperature: Double? = null,
+
+    /**
+     * H2C : températures des deux entrées d'extrudeur physiques.
+     *
+     * Bambu les transmet dans device.extruder.info avec id 0 et 1.
+     * Le champ temp est un entier compacté :
+     * - 16 bits bas   = température actuelle
+     * - 16 bits hauts = température cible
+     *
+     * IMPORTANT :
+     * nozzleTemperature/nozzleTargetTemperature (champs racine
+     * nozzle_temper / nozzle_target_temper) sont conservés pour
+     * compatibilité, mais on ne suppose PAS qu'ils représentent
+     * systématiquement la tête active.
+     */
+    val head0Temperature: Double? = null,
+
+    val head0TargetTemperature: Double? = null,
+
+    val head1Temperature: Double? = null,
+
+    val head1TargetTemperature: Double? = null,
 
     val bedTemperature: Double? = null,
 

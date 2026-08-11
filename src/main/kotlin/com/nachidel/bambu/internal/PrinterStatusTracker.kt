@@ -158,6 +158,39 @@ internal class PrinterStatusTracker {
                 jsonObject
             }?.getOrNull()
 
+        val device =
+            print["device"] as? JsonObject
+
+        val extruder =
+            device?.get("extruder") as? JsonObject
+
+        val extruderInfo =
+            extruder?.get("info") as? JsonArray
+
+        val head0 =
+            extruderInfo
+                ?.firstOrNull { item ->
+                    (item as? JsonObject)
+                        ?.intValue("id") == 0
+                }
+                ?.let {
+                    parsePackedTemperature(
+                        it as? JsonObject
+                    )
+                }
+
+        val head1 =
+            extruderInfo
+                ?.firstOrNull { item ->
+                    (item as? JsonObject)
+                        ?.intValue("id") == 1
+                }
+                ?.let {
+                    parsePackedTemperature(
+                        it as? JsonObject
+                    )
+                }
+
         val incomingJobId =
             print.stringValue("job_id")
 
@@ -253,6 +286,22 @@ internal class PrinterStatusTracker {
             print.doubleValue("nozzle_target_temper")
                 ?: base.nozzleTargetTemperature
 
+        val newHead0Temperature =
+            head0?.current
+                ?: base.head0Temperature
+
+        val newHead0TargetTemperature =
+            head0?.target
+                ?: base.head0TargetTemperature
+
+        val newHead1Temperature =
+            head1?.current
+                ?: base.head1Temperature
+
+        val newHead1TargetTemperature =
+            head1?.target
+                ?: base.head1TargetTemperature
+
         val newBedTemperature =
             print.doubleValue("bed_temper")
                 ?: base.bedTemperature
@@ -294,6 +343,10 @@ internal class PrinterStatusTracker {
             remainingTime = newRemainingTime,
             nozzleTemperature = newNozzleTemperature,
             nozzleTargetTemperature = newNozzleTargetTemperature,
+            head0Temperature = newHead0Temperature,
+            head0TargetTemperature = newHead0TargetTemperature,
+            head1Temperature = newHead1Temperature,
+            head1TargetTemperature = newHead1TargetTemperature,
             bedTemperature = newBedTemperature,
             bedTargetTemperature = newBedTargetTemperature,
             projectFileUrl = newProjectFileUrl,
@@ -542,6 +595,10 @@ internal class PrinterStatusTracker {
                 previous.remainingTime != current.remainingTime ||
                 previous.nozzleTemperature != current.nozzleTemperature ||
                 previous.nozzleTargetTemperature != current.nozzleTargetTemperature ||
+                previous.head0Temperature != current.head0Temperature ||
+                previous.head0TargetTemperature != current.head0TargetTemperature ||
+                previous.head1Temperature != current.head1Temperature ||
+                previous.head1TargetTemperature != current.head1TargetTemperature ||
                 previous.bedTemperature != current.bedTemperature ||
                 previous.bedTargetTemperature != current.bedTargetTemperature ||
                 previous.projectFileUrl != current.projectFileUrl ||
@@ -582,6 +639,62 @@ internal class PrinterStatusTracker {
                 )
             }
         }
+    }
+
+    /**
+     * Décodage observé dans les captures MQTT H2C pour
+     * device.extruder.info[].temp.
+     *
+     * Exemples réellement présents dans les logs :
+     * 14418140 = 0x00DC00DC -> actuel 220 / cible 220
+     *  9175232 = 0x008C00C0 -> actuel 192 / cible 140
+     * 11796667 = 0x00B400BB -> actuel 187 / cible 180
+     *
+     * Une valeur simple telle que 41 donne :
+     * actuel 41 / cible 0.
+     *
+     * On ne déduit PAS ici quelle tête est active.
+     */
+    private data class PackedTemperature(
+        val current: Double,
+        val target: Double
+    )
+
+    private fun parsePackedTemperature(
+        extruder: JsonObject?
+    ): PackedTemperature? {
+
+        val packed =
+            extruder
+                ?.get("temp")
+                ?.jsonPrimitive
+                ?.longOrNull
+                ?: return null
+
+        val currentRaw =
+            (packed and 0xFFFFL)
+
+        val targetRaw =
+            ((packed ushr 16) and 0xFFFFL)
+
+        /*
+         * Protection simple contre une interprétation absurde si
+         * le format change dans un futur firmware.
+         *
+         * La H2C travaille très largement sous ces limites ;
+         * 500 °C laisse volontairement une marge confortable.
+         */
+        if (
+            currentRaw > 500L ||
+            targetRaw > 500L
+        ) {
+            return null
+        }
+
+        return PackedTemperature(
+            current = currentRaw.toDouble(),
+            target = targetRaw.toDouble()
+        )
     }
 
     private fun JsonObject.stringValue(
