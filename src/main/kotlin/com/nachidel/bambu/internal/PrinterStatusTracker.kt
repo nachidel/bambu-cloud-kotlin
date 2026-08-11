@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
 import com.nachidel.bambu.model.PrinterDiagnosticCodeResolver
 
@@ -244,6 +245,22 @@ internal class PrinterStatusTracker {
                 ?: print.intValue("mc_remaining_time")
                 ?: base.remainingTime
 
+        val newNozzleTemperature =
+            print.doubleValue("nozzle_temper")
+                ?: base.nozzleTemperature
+
+        val newNozzleTargetTemperature =
+            print.doubleValue("nozzle_target_temper")
+                ?: base.nozzleTargetTemperature
+
+        val newBedTemperature =
+            print.doubleValue("bed_temper")
+                ?: base.bedTemperature
+
+        val newBedTargetTemperature =
+            print.doubleValue("bed_target_temper")
+                ?: base.bedTargetTemperature
+
         val diagnostics =
             applyDiagnosticsPatch(
                 base = base.diagnostics,
@@ -259,6 +276,10 @@ internal class PrinterStatusTracker {
             currentLayer = newCurrentLayer,
             totalLayers = newTotalLayers,
             remainingTime = newRemainingTime,
+            nozzleTemperature = newNozzleTemperature,
+            nozzleTargetTemperature = newNozzleTargetTemperature,
+            bedTemperature = newBedTemperature,
+            bedTargetTemperature = newBedTargetTemperature,
             diagnostics = diagnostics
         )
     }
@@ -500,7 +521,11 @@ internal class PrinterStatusTracker {
                 previous.percent != current.percent ||
                 previous.currentLayer != current.currentLayer ||
                 previous.totalLayers != current.totalLayers ||
-                previous.remainingTime != current.remainingTime
+                previous.remainingTime != current.remainingTime ||
+                previous.nozzleTemperature != current.nozzleTemperature ||
+                previous.nozzleTargetTemperature != current.nozzleTargetTemperature ||
+                previous.bedTemperature != current.bedTemperature ||
+                previous.bedTargetTemperature != current.bedTargetTemperature
     }
 
     private fun parseHms(
@@ -557,6 +582,15 @@ internal class PrinterStatusTracker {
         return this[name]
             ?.jsonPrimitive
             ?.intOrNull
+    }
+
+    private fun JsonObject.doubleValue(
+        name: String
+    ): Double? {
+
+        return this[name]
+            ?.jsonPrimitive
+            ?.doubleOrNull
     }
 
     private fun JsonObject.rawValue(

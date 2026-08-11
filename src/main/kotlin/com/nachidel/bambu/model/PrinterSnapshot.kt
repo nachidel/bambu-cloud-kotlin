@@ -24,6 +24,20 @@ data class PrinterSnapshot(
 
     val remainingTime: Int? = null,
 
+    /**
+     * Températures remontées par le flux Bambu Cloud / MQTT.
+     *
+     * Les valeurs restent null tant qu'elles n'ont pas encore
+     * été reçues dans un push_status.
+     */
+    val nozzleTemperature: Double? = null,
+
+    val nozzleTargetTemperature: Double? = null,
+
+    val bedTemperature: Double? = null,
+
+    val bedTargetTemperature: Double? = null,
+
     val diagnostics: PrinterDiagnostics =
         PrinterDiagnostics()
 )
