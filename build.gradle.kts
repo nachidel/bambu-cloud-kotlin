@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.nachidel"
-version = "0.1.3"
+version = "0.1.4"
 
 application {
     mainClass.set("com.nachidel.bambu.MainKt")

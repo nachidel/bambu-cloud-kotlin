@@ -222,23 +222,57 @@ internal class PrinterStatusTracker {
                     current.state != PrinterState.PREPARING
 
         val base =
-            if (
-                jobChanged ||
-                enteringPrepare
-            ) {
+            when {
 
-                PrinterSnapshot(
-                    jobId =
-                        incomingJobId
-                            ?: current.jobId,
+                /*
+                 * Un vrai changement de job ne doit jamais hériter
+                 * de l'URL / vignette du travail précédent.
+                 *
+                 * Si le paquet qui annonce le nouveau job est justement
+                 * project_file, l'URL sera reprise plus bas depuis print["url"].
+                 */
+                jobChanged -> {
 
-                    subtaskName =
-                        incomingSubtaskName
-                            ?: current.subtaskName
-                )
+                    PrinterSnapshot(
+                        jobId =
+                            incomingJobId,
 
-            } else {
-                current
+                        subtaskName =
+                            incomingSubtaskName
+                    )
+                }
+
+                /*
+                 * Séquence réellement observée sur H2C :
+                 *
+                 * project_file (avec URL 3MF)
+                 *     -> PREPARE
+                 *     -> RUNNING
+                 *
+                 * PREPARE sert bien à nettoyer progression/couches de
+                 * l'ancien job, MAIS il ne faut surtout pas jeter les
+                 * métadonnées project_file déjà reçues pour le même job.
+                 */
+                enteringPrepare -> {
+
+                    PrinterSnapshot(
+                        jobId =
+                            incomingJobId
+                                ?: current.jobId,
+
+                        subtaskName =
+                            incomingSubtaskName
+                                ?: current.subtaskName,
+
+                        projectFileUrl =
+                            current.projectFileUrl,
+
+                        plateIndex =
+                            current.plateIndex
+                    )
+                }
+
+                else -> current
             }
 
         val newRawGcodeState =
