@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import com.nachidel.bambu.auth.AuthenticationResult
 import com.nachidel.bambu.auth.AuthenticationService
 import com.nachidel.bambu.exception.BambuAuthenticationException
+import com.nachidel.bambu.model.PrintTask
 import com.nachidel.bambu.model.Printer
 import com.nachidel.bambu.model.PrinterState
 import com.nachidel.bambu.model.PrinterType
@@ -42,6 +43,11 @@ class DefaultBambuCloudClient(
 
     private val discovery =
         CloudDiscoveryService(
+            httpClient
+        )
+
+    private val tasks =
+        CloudTaskService(
             httpClient
         )
 
@@ -213,6 +219,19 @@ class DefaultBambuCloudClient(
         error(
             "Multiple printers are linked to this account. " +
                     "Set printer in BambuConfiguration."
+        )
+    }
+
+    override suspend fun latestTask(printer: SerialNumber): PrintTask? {
+        val token =
+            configuration.accessToken
+                ?: throw BambuAuthenticationException(
+                    "An access token is required to retrieve print tasks"
+                )
+
+        return tasks.getLatestTask(
+            accessToken = token.value,
+            deviceId = printer.value
         )
     }
 
